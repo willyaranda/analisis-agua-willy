@@ -3,7 +3,6 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 
 program
-    .option('--file <file>', 'input file')
     .option('--num-abonado <numAbonado>', 'number of abonado')
     .option('--max-consumo <maxConsumo>', 'minimum consumption', 0)
     .option('--num-trimestres <numTrimestres>', 'number of trimesters', 10)
@@ -12,7 +11,8 @@ program.parse()
 
 const options = program.opts()
 
-const file = options.file
+const fileDump = 'resources/T_SIA_LECTURAS_v2.csv'
+const fileNew = 'resources/Lecturas_Aranda.csv'
 const numAbonado = options.numAbonado
 const maxConsumo = options.maxConsumo
 const numTrimestres = options.numTrimestres
@@ -20,6 +20,7 @@ const numTrimestres = options.numTrimestres
 const readCSVFile = async (params) => {
     // Read file
     const filePath = join(import.meta.dirname, '..', params.file)
+    console.log(`Reading file: ${filePath}`)
     const fileContent = await readFile(filePath, 'utf8')
     return fileContent
 }
@@ -65,16 +66,11 @@ const mangleLecturaObj = (obj) => {
     return obj;
 }
 
-// Function to parse the file, as it's a csv
-const parseCSV = (fileContent) => {
+const parseCSVOld = (fileContent) => {
     const lines = fileContent.split('\n')
     const headers = lines[0].split(',').map(header => header.trim().replace(/\r/g, ''))
     const data = lines.slice(1).map(line => {
         const values = line.split(',')
-        // Drop if the first value is not a number
-        if (isNaN(values[0])) {
-            return null
-        }
         const obj = headers.reduce((obj, header, index) => {
             obj[header] = (values[index] || '').trim().replace(/\r/g, '')
             return obj
@@ -96,6 +92,60 @@ const parseCSV = (fileContent) => {
             item.SREAL = parseFloat(item.SREAL)
             return item
         })
+}
+
+const parseCSVNew = (fileContent) => {
+    const lines = fileContent.split('\n')
+    const ret = [];
+    lines.slice(1).forEach(line => {
+        const values = line.split(';')
+        if (isNaN(values[0])) {
+            return null
+        }
+        const CABONADO = values[0].trim().replace(/\r/g, '')
+        const t124 = {
+            CABONADO,
+            ano_trimestre: '2024T1',
+            NLECTURA: parseInt(values[1].trim().replace(/\r/g, '')),
+            fecha_lectura: new Date(`2024-01-01`),
+            CANO_LECT: 2024,
+            CPERIODO: 1,
+        };
+        const t224 = {
+            CABONADO,
+            ano_trimestre: '2024T2',
+            NLECTURA: parseInt(values[2].trim().replace(/\r/g, '')),
+            fecha_lectura: new Date(`2024-04-01`),
+            CANO_LECT: 2024,
+            CPERIODO: 2,
+        };
+        const t324 = {
+            CABONADO,
+            ano_trimestre: '2024T3',
+            NLECTURA: parseInt(values[3].trim().replace(/\r/g, '')),
+            fecha_lectura: new Date(`2024-07-01`),
+            CANO_LECT: 2024,
+            CPERIODO: 3,
+        };
+        const t424 = {
+            CABONADO,
+            ano_trimestre: '2024T4',
+            NLECTURA: parseInt(values[4].trim().replace(/\r/g, '')),
+            fecha_lectura: new Date(`2024-10-01`),
+            CANO_LECT: 2024,
+            CPERIODO: 4,
+        };
+        const t125 = {
+            CABONADO,
+            ano_trimestre: '2025T1',
+            NLECTURA: parseInt(values[5].trim().replace(/\r/g, '')),
+            fecha_lectura: new Date(`2025-01-01`),
+            CANO_LECT: 2025,
+            CPERIODO: 1,
+        };
+        ret.push(t124, t224, t324, t424, t125);
+    })
+    return ret;
 }
 
 // Function to reduce the data by CABONADO
@@ -127,65 +177,74 @@ const getAllAbonadosWithXConsumeZeroInTheLastYTrimestres = (groupedAbonado, maxC
     Object.values(groupedAbonado).forEach(abonado => {
         const lecturas = abonado.sort(sortByTrimestreLectura);
 
-        // First check if the fecha_lectura is in the last 5 years
-        const lastDate = new Date();
-        lastDate.setFullYear(lastDate.getFullYear() - 5);
-
-        const lecturasFiltered = lecturas.filter(lectura => {
-            return lectura.fecha_lectura >= lastDate
-        });
-        if (lecturasFiltered.length === 0 || lecturasFiltered.length < numTrimestres) {
+        if (lecturas.length === 0) {
             // If there are not enough readings, skip this abonado
             return;
         }
-        // Get last numTrimestres
-        // const lecturasLast = lecturasFiltered.slice(-numTrimestres);
-        // // If the first and last are the same, then all are the same
-        // if (lecturasLast[0].NLECTURA === lecturasLast[lecturasLast.length - 1].NLECTURA) {
-        //     abonadosSet.add(lecturasLast[0].CABONADO);
-        // }
-        // If last lectura is 0, then do nothing
-        if (lecturasFiltered[lecturasFiltered.length - 1].NLECTURA === 0) {
+        // Check that we have a lectura for this year
+        if (!lecturas.some(lectura => lectura.CANO_LECT === 2025)) {
             return;
         }
-        const diffConsumo = lecturas[lecturas.length - 1].NLECTURA - lecturas[Math.max(lecturas.length - numTrimestres, 0)].NLECTURA;
-        if (diffConsumo <= maxConsumo) {
-            abonadosSet.add(lecturas[0].CABONADO);
+
+        // Slice the last numTrimestres readings, excluding the first one
+        const lecturasFilteredSliced = lecturas.slice(1).slice(-numTrimestres)
+        const oldestLectura = lecturasFilteredSliced[0];
+        const newestLectura = lecturasFilteredSliced[lecturasFilteredSliced.length - 1];
+        // console.log(`Oldest lectura: ${oldestLectura.NLECTURA} (trimestre ${oldestLectura.ano_trimestre}), Newest lectura: ${newestLectura.NLECTURA} (trimestre ${newestLectura.ano_trimestre}), Abonado: ${oldestLectura.CABONADO}`);
+        const diff = newestLectura.NLECTURA - oldestLectura.NLECTURA;
+        // Filter out abonados with no readings (or 0)
+        if (newestLectura.NLECTURA === 0 && oldestLectura.NLECTURA === 0) {
+            return;
+        }
+        if (diff < 1 && diff > -1) {
+            abonadosSet.add(lecturasFilteredSliced[0].CABONADO);
         }
     });
     return Array.from(abonadosSet);
 }
 
+const printConsumosMinimos = (groupedAbonado, maxConsumo, numTrimestres) => {
+    // // const noConsumoInTheLastXLecturas = getAllAbonadosWithAtXLecturasThatAreZero(parsedData, numLecturas)
+    const abonadosConsumoMinimo = getAllAbonadosWithXConsumeZeroInTheLastYTrimestres(groupedAbonado, maxConsumo, numTrimestres)
+    // // console.log(abonadosConConsumoCeroEnLosUltimosXTrimestres.slice(abonadosConConsumoCeroEnLosUltimosXTrimestres.length - 10))
+    // // console.log(JSON.stringify(abonadosConConsumoCeroEnLosUltimosXTrimestres, null, 2))
+    for (const abonado of abonadosConsumoMinimo) {
+        console.table(groupedAbonado[abonado].sort(sortByTrimestreLectura).splice(-numTrimestres))
+        console.log('\n\n')
+    }
+    console.log(`There are ${abonadosConsumoMinimo.length} abonados with maxConsumo=${maxConsumo} in the last ${numTrimestres} trimesters`)
+}
+
+const printOnlyOneAbonado = (groupedData, numAbonado) => {
+    const toPrint = groupedData[numAbonado].sort(sortByTrimestreLectura).map(item => {
+        return {
+            "Abonado": item.CABONADO,
+            "CodContador": item.CCONTADOR,
+            "Trimestre": item.ano_trimestre,
+            "Fecha Lectura": item.fecha_lectura.toLocaleDateString(),
+            "Consumo": item.NLECTURA,
+            "Observaciones": item.DOBSERV,
+        }
+    });
+    console.table(toPrint);
+}
+
 
 // Main function
 const main = async () => {
-    if (!file) {
-        console.error('Please provide a file path using --file option')
-        process.exit(1)
-    }
-    const fileContent = await readCSVFile({ file })
-    const parsedData = parseCSV(fileContent)
-    const groupedData = parsedData.reduce(reduceByCAbonado, {})
-    // const noConsumoInTheLastXLecturas = getAllAbonadosWithAtXLecturasThatAreZero(parsedData, numLecturas)
-    const abonadosConsumoMinimo = getAllAbonadosWithXConsumeZeroInTheLastYTrimestres(groupedData, maxConsumo, numTrimestres)
-    // console.log(abonadosConConsumoCeroEnLosUltimosXTrimestres.slice(abonadosConConsumoCeroEnLosUltimosXTrimestres.length - 10))
-    // console.log(JSON.stringify(abonadosConConsumoCeroEnLosUltimosXTrimestres, null, 2))
-    for (const abonado of abonadosConsumoMinimo) {
-        console.table(groupedData[abonado].sort(sortByTrimestreLectura))
-        console.log('\n\n')
-    }
-    console.log(`There are ${abonadosConsumoMinimo.length} abonados with maxConsumo=${maxConsumo} in the last ${numTrimestres} trimesters, and in the last 5 years`)
+    const fileDumpContent = await readCSVFile({ file: fileDump })
+    const fileNewContent = await readCSVFile({ file: fileNew })
+    const parsedDumpData = parseCSVOld(fileDumpContent)
+    const parsedDataNew = parseCSVNew(fileNewContent)
+    // Merge the two arrays
+    parsedDumpData.push(...parsedDataNew)
+    const groupedData = parsedDumpData.reduce(reduceByCAbonado, {})
 
-    // 80003311 casa abuela
-    // console.table(groupedData[numAbonado].sort(sortByTrimestreLectura))
-    // console.table(parsedData.slice(0, 1000).sort(sortByTrimestreLectura))
-
-    // Do something with the parsed data
-    // For example, save it to a database or process it further
-    // ...
-    // For now, we'll just log it to the console
-    // Return the parsed data
-    return parsedData
+    if (numAbonado) {
+        printOnlyOneAbonado(groupedData, numAbonado);
+    } else {
+        printConsumosMinimos(groupedData, maxConsumo, numTrimestres);
+    }
 }
 
 (async () => {
